@@ -1,116 +1,116 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
-using TodoApi.Models;
+using TodoApiDTO.Exceptions;
+using TodoApiDTO.Interfaces;
+using TodoApiDTO.ModelsDTO;
 
-namespace TodoApi.Controllers
+namespace TodoApiDTO.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
     public class TodoItemsController : ControllerBase
     {
-        private readonly TodoContext _context;
+        private readonly ILogger<TodoItemsController> logger;
+        private readonly ITodoItemService todoItemService;
 
-        public TodoItemsController(TodoContext context)
+        public TodoItemsController(
+            ITodoItemService todoItemService,
+            ILogger<TodoItemsController> logger)
         {
-            _context = context;
+            this.todoItemService = todoItemService;
+            this.logger = logger;
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<TodoItemDTO>>> GetTodoItems()
+        public async Task<List<TodoItemDTO>> GetTodoItemsAsync()
         {
-            return await _context.TodoItems
-                .Select(x => ItemToDTO(x))
-                .ToListAsync();
+            var result = await todoItemService.GetTodoItemsAsync();
+            return result;
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<TodoItemDTO>> GetTodoItem(long id)
+        public async Task<ActionResult<TodoItemDTO>> GetTodoItemAsync(long id)
         {
-            var todoItem = await _context.TodoItems.FindAsync(id);
-
-            if (todoItem == null)
-            {
-                return NotFound();
-            }
-
-            return ItemToDTO(todoItem);
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateTodoItem(long id, TodoItemDTO todoItemDTO)
-        {
-            if (id != todoItemDTO.Id)
-            {
-                return BadRequest();
-            }
-
-            var todoItem = await _context.TodoItems.FindAsync(id);
-            if (todoItem == null)
-            {
-                return NotFound();
-            }
-
-            todoItem.Name = todoItemDTO.Name;
-            todoItem.IsComplete = todoItemDTO.IsComplete;
-
             try
             {
-                await _context.SaveChangesAsync();
+                var result = await todoItemService.GetTodoItemAsync(id);
+                return result;
             }
-            catch (DbUpdateConcurrencyException) when (!TodoItemExists(id))
+            catch (TodoItemNotFoundException ex)
             {
+                logger.LogError(ex, ex.Message);
                 return NotFound();
             }
-
-            return NoContent();
+            catch (Exception ex)
+            {
+                logger.LogError(ex, $"Unknown error when getting todoitem by id: {id}");
+                return BadRequest();
+            }
         }
 
         [HttpPost]
-        public async Task<ActionResult<TodoItemDTO>> CreateTodoItem(TodoItemDTO todoItemDTO)
+        public async Task<ActionResult<TodoItemDTO>> CreateTodoItemAsync(TodoItemDTO todoItemDTO)
         {
-            var todoItem = new TodoItem
+            try
             {
-                IsComplete = todoItemDTO.IsComplete,
-                Name = todoItemDTO.Name
-            };
-
-            _context.TodoItems.Add(todoItem);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction(
-                nameof(GetTodoItem),
-                new { id = todoItem.Id },
-                ItemToDTO(todoItem));
+                var result = await todoItemService.CreateTodoItemAsync(todoItemDTO);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unknown error occurred while creating todoitem");
+                return BadRequest();
+            }
         }
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteTodoItem(long id)
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateTodoItemAsync(long id, TodoItemDTO todoItemDTO)
         {
-            var todoItem = await _context.TodoItems.FindAsync(id);
-
-            if (todoItem == null)
+            if (id != todoItemDTO.Id)
             {
-                return NotFound();
+                logger.LogInformation($"Todoitem update request called." + $"Id mismatch found: {id} and {todoItemDTO.Id}");
+                return BadRequest();
             }
 
-            _context.TodoItems.Remove(todoItem);
-            await _context.SaveChangesAsync();
+            try
+            {
+                await todoItemService.UpdateTodoItemAsync(todoItemDTO);
+            }
+            catch (TodoItemNotFoundException ex)
+            {
+                logger.LogError(ex, ex.Message);
+                return NotFound();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, $"Unknown error when updating a todoitem with id: {id}");
+                return BadRequest();
+            }
 
             return NoContent();
         }
 
-        private bool TodoItemExists(long id) =>
-             _context.TodoItems.Any(e => e.Id == id);
-
-        private static TodoItemDTO ItemToDTO(TodoItem todoItem) =>
-            new TodoItemDTO
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteTodoItemAsync(long id)
+        {
+            try
             {
-                Id = todoItem.Id,
-                Name = todoItem.Name,
-                IsComplete = todoItem.IsComplete
-            };       
+                await todoItemService.DeleteTodoItemAsync(id);
+                return NoContent();
+            }
+            catch (TodoItemNotFoundException ex) 
+            {
+                logger.LogError(ex, ex.Message);
+                return NotFound();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, $"Unknown error when deleting a todoItem with id : {id}");
+                return BadRequest();
+            }
+        }
     }
 }
